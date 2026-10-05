@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Слово</title>
+<style>
+  :root {
+    --u: min(1vh, 0.5625vw);            /* 1 «единица» = 1% высоты экрана 16:9 */
+    --bg: #0f1b24;
+    --tile: #1b2b38;
+    --line: #35516a;
+    --green: #3e9b55;
+    --yellow: #e5b22e;
+    --brown: #7b4a2a;
+    --text: #f2ede4;
+    --dim: #93a4b3;
+    --accent: #5fb4d6;
+    --p1: #5fb4d6;
+    --p2: #e08a5f;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { height: 100%; background: var(--bg); color: var(--text); overflow: hidden;
+    font-family: "Roboto", "Noto Sans", sans-serif; -webkit-user-select: none; user-select: none;
+    -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+
+  #app { height: 100%; display: flex; align-items: center; justify-content: center;
+    gap: calc(var(--u) * 9); padding: calc(var(--u) * 5) calc(var(--u) * 6); }
+
+  /* ---------- телефон: экран уже, чем выше → колонка вместо ряда ---------- */
+  @media (max-aspect-ratio: 11/10) {
+    :root { --u: min(1.3vw, 0.6vh); }   /* ширина экрана — главное ограничение в портрете */
+    #app { flex-direction: column; justify-content: flex-start;
+      gap: calc(var(--u) * 2.6); padding: calc(var(--u) * 2.8) calc(var(--u) * 3); overflow-y: auto; }
+    #side { width: 100%; align-items: center; text-align: center; gap: calc(var(--u) * 2); }
+    h1 { font-size: calc(var(--u) * 6); }
+    #legend { flex-wrap: wrap; justify-content: center; row-gap: calc(var(--u) * .8); }
+    .key { min-width: 0; }   /* разрешаем клавишам сжиматься теснее текста, чтобы ряд из 12 букв не вылезал за экран */
+  }
+  @media (hover: none) {
+    .tile, .key, #again, .menu-btn { cursor: pointer; }
+  }
+
+  /* ---------- сетка попыток ---------- */
+  #board { display: grid; grid-template-rows: repeat(5, 1fr); gap: calc(var(--u) * 1.4); position: relative; }
+  .row { display: grid; grid-template-columns: repeat(5, 1fr); gap: calc(var(--u) * 1.4); transition: opacity .3s; }
+  .row.burned { opacity: .22; }
+  .tile { width: calc(var(--u) * 11.6); height: calc(var(--u) * 11.6);
+    display: flex; align-items: center; justify-content: center;
+    font-size: calc(var(--u) * 6.4); font-weight: 800; text-transform: uppercase;
+    background: var(--tile); border: calc(var(--u) * .45) solid var(--line); border-radius: calc(var(--u) * 1.2);
+    position: relative; }
+  .tile.filled { border-color: #8aa4bb; animation: pop .12s ease-out; }
+  .tile.hinted::after { content: ''; position: absolute; top: calc(var(--u) * .9); right: calc(var(--u) * .9);
+    width: calc(var(--u) * 1.3); height: calc(var(--u) * 1.3); border-radius: 50%; background: var(--yellow); }
+  .tile.g { background: var(--green);  border-color: var(--green); }
+  .tile.y { background: var(--yellow); border-color: var(--yellow); color: #2a2100; }
+  .tile.b { background: var(--brown);  border-color: var(--brown); }
+  .tile.flip { animation: flip .6s ease-in-out; }
+  .tile.winjump { animation: winjump .55s ease-in-out; }
+  .row.shake { animation: shake .4s; }
+  @keyframes pop  { 50% { transform: scale(1.1); } }
+  @keyframes flip { 50% { transform: rotateX(90deg); } }
+  @keyframes winjump { 0%,100% { transform: translateY(0); } 30% { transform: translateY(-22%); } 55% { transform: translateY(3%); } 75% { transform: translateY(-8%); } }
+  @keyframes shake { 20%,60% { transform: translateX(-1.2vh); } 40%,80% { transform: translateX(1.2vh); } }
+
+  /* ---------- правая колонка ---------- */
+  #side { display: flex; flex-direction: column; gap: calc(var(--u) * 2.6); width: calc(var(--u) * 92); }
+  h1 { font-size: calc(var(--u) * 8); font-weight: 900; letter-spacing: .02em; line-height: 1; }
+  #hint { font-size: calc(var(--u) * 3); color: var(--dim); min-height: calc(var(--u) * 4); }
+  #hint.err { color: var(--yellow); }
+  #namebar { display: none; font-size: calc(var(--u) * 4.4); font-weight: 800; min-height: calc(var(--u) * 5.5); }
+  #namebar.show { display: block; }
+  #namebar .cursor { opacity: .55; }
+
+  /* ---------- табло игроков (режим на двоих) ---------- */
+  #scoreboard { display: none; gap: calc(var(--u) * 1.6); font-size: calc(var(--u) * 3); }
+  #scoreboard.show { display: flex; }
+  .pchip { flex: 1; padding: calc(var(--u) * 1.4) calc(var(--u) * 1.8); border-radius: calc(var(--u) * 1.2);
+    background: #1b2b38; border: calc(var(--u) * .35) solid transparent; display: flex;
+    justify-content: space-between; gap: calc(var(--u) * 1); opacity: .6; transition: opacity .2s, border-color .2s; }
+  .pchip.active { opacity: 1; }
+  .pchip.p1.active { border-color: var(--p1); }
+  .pchip.p2.active { border-color: var(--p2); }
+  .pchip .nm { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pchip .sc { color: var(--dim); }
+
+  #kb { display: flex; flex-direction: column; gap: calc(var(--u) * 1.2); }
+  .krow { display: flex; gap: calc(var(--u) * 1.2); justify-content: center; }
+  .key { flex: 1 1 0; height: calc(var(--u) * 9.4); display: flex; align-items: center; justify-content: center;
+    font-size: calc(var(--u) * 4.4); font-weight: 700; text-transform: uppercase;
+    background: #2a3d4d; border-radius: calc(var(--u) * 1.2); border: calc(var(--u) * .5) solid transparent;
+    transition: opacity .2s; }
+  .key.wide { flex: 1.9 1 0; font-size: calc(var(--u) * 3.2); }
+  .key.g { background: var(--green); }
+  .key.y { background: var(--yellow); color: #2a2100; }
+  .key.b { background: var(--brown); color: #d9c3b0; }
+  .key.focus { border-color: #fff; transform: scale(1.12); position: relative; z-index: 1;
+    box-shadow: 0 0 0 calc(var(--u) * .5) rgba(255,255,255,.35); }
+  .key.disabled { opacity: .3; }
+  .krow.enter-row { margin-top: calc(var(--u) * .4); }
+  .krow.enter-row .key { flex: 1 1 0; font-size: calc(var(--u) * 3.6); font-weight: 800; background: #2f4558; }
+  .krow.enter-row .key-main { flex: 3 1 0; letter-spacing: .03em; }
+  .krow.enter-row .key-hint { background: #4a3b1f; }
+  .krow.enter-row .key-voice { background: #1f3b4a; }
+
+  #legend { display: flex; gap: calc(var(--u) * 3.4); font-size: calc(var(--u) * 2.7); color: var(--dim); }
+  #legend span { display: flex; align-items: center; gap: calc(var(--u) * 1); }
+  #legend i { width: calc(var(--u) * 2.6); height: calc(var(--u) * 2.6); border-radius: calc(var(--u) * .6); display: inline-block; }
+  #stats { font-size: calc(var(--u) * 2.7); color: var(--dim); }
+
+  /* ---------- оверлеи (меню, ввод имени, итог) ---------- */
+  .overlay { position: fixed; inset: 0; background: rgba(8,14,20,.97); display: none;
+    align-items: center; justify-content: center; flex-direction: column; gap: calc(var(--u) * 3.5);
+    padding: calc(var(--u) * 4); text-align: center; z-index: 5; }
+  .overlay.show { display: flex; }
+  .overlay h2 { font-size: calc(var(--u) * 7); font-weight: 900; }
+  .overlay p.sub { font-size: calc(var(--u) * 3.2); color: var(--dim); }
+
+  .menu-btn { width: calc(var(--u) * 60); max-width: 80vw; padding: calc(var(--u) * 2.4) calc(var(--u) * 4);
+    font-size: calc(var(--u) * 4); font-weight: 800; background: #2a3d4d; border-radius: calc(var(--u) * 1.6);
+    border: calc(var(--u) * .5) solid transparent; }
+  .menu-btn.focus { border-color: #fff; box-shadow: 0 0 0 calc(var(--u) * .5) rgba(255,255,255,.35); transform: scale(1.05); }
+  #menu-list { display: flex; flex-direction: column; gap: calc(var(--u) * 2); align-items: center; }
+
+  #answer { display: flex; gap: calc(var(--u) * 1.2); }
+  #answer .tile { width: calc(var(--u) * 9.5); height: calc(var(--u) * 9.5); font-size: calc(var(--u) * 5.4); }
+  #again { margin-top: calc(var(--u) * 1.5); padding: calc(var(--u) * 2.2) calc(var(--u) * 6);
+    font-size: calc(var(--u) * 4); font-weight: 800; background: #2a3d4d; border-radius: calc(var(--u) * 1.6);
+    border: calc(var(--u) * .6) solid #fff; box-shadow: 0 0 0 calc(var(--u) * .6) rgba(255,255,255,.35); }
+
+  /* ---------- конфетти ---------- */
+  #confetti { position: fixed; inset: 0; pointer-events: none; overflow: hidden; z-index: 10; }
+  #confetti i { position: absolute; top: -5vh; width: 1vh; height: 2.4vh; opacity: .9;
+    animation-name: confetti-fall; animation-timing-function: linear; animation-fill-mode: forwards; }
+  @keyframes confetti-fall {
+    0%   { transform: translateY(0) translateX(0) rotate(0deg); }
+    100% { transform: translateY(112vh) translateX(var(--drift)) rotate(var(--spin)); }
+  }
+
+  @media (prefers-reduced-motion: reduce) { .tile, .row, #confetti i { animation: none !important; } }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="board" aria-label="Поле попыток"></div>
+  <div id="side">
+    <h1>Слово</h1>
+    <div id="scoreboard">
+      <div class="pchip p1" id="chip1"><span class="nm"></span><span class="sc"></span></div>
+      <div class="pchip p2" id="chip2"><span class="nm"></span><span class="sc"></span></div>
+    </div>
+    <div id="namebar"></div>
+    <div id="hint">Угадайте слово из 5 букв</div>
+    <div id="kb"></div>
+    <div id="legend">
+      <span><i style="background:var(--green)"></i>на своём месте</span>
+      <span><i style="background:var(--yellow)"></i>есть в слове</span>
+      <span><i style="background:var(--brown)"></i>нет в слове</span>
+    </div>
+    <div id="stats"></div>
+  </div>
+</div>
+
+<div id="confetti"></div>
+
+<div id="menu" class="overlay">
+  <h2>Слово</h2>
+  <p class="sub">Сколько будет играть?</p>
+  <div id="menu-list">
+    <div class="menu-btn" data-mode="1">Один игрок</div>
+    <div class="menu-btn" data-mode="2">Два игрока</div>
+  </div>
+</div>
+
+<div id="over" class="overlay">
+  <h2 id="over-title"></h2>
+  <p class="sub">Загаданное слово</p>
+  <div id="answer"></div>
+  <div id="again">Играть снова</div>
+</div>
+
+<script src="words.js"></script>
+<script src="game.js"></script>
+<script>
+(function () {
+  const LAYOUT = [
+    ['й','ц','у','к','е','н','г','ш','щ','з','х','ъ'],
+    ['ф','ы','в','а','п','р','о','л','д','ж','э'],
+    ['я','ч','с','м','и','т','ь','б','ю','BACK'],
+    ['HINT', 'VOICE', 'ENTER']
+  ];
+  const $ = (id) => document.getElementById(id);
+  const boardEl = $('board'), kbEl = $('kb'), hintEl = $('hint');
+
+  /* ---------- звук (синтез на лету, без аудиофайлов) ---------- */
+  const Sound = (() => {
+    let ctx;
+    function c() { if (!ctx) { try { ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} } return ctx; }
+    function tone(freq, start, dur, type, peak) {
+      const a = c(); if (!a) return;
+      try {
+        const o = a.createOscillator(), g = a.createGain();
+        o.type = type; o.frequency.value = freq;
+        o.connect(g); g.connect(a.destination);
+        const t0 = a.currentTime + start;
+        g.gain.setValueAtTime(0, t0);
+        g.gain.linearRampToValueAtTime(peak, t0 + 0.012);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+        o.start(t0); o.stop(t0 + dur + 0.03);
+      } catch (e) {}
+    }
+    return {
+      click:  () => tone(520, 0, 0.05, 'square', 0.10),
+      ding:   () => tone(920, 0, 0.16, 'sine', 0.18),
+      mid:    () => tone(420, 0, 0.12, 'sine', 0.14),
+      thud:   () => tone(150, 0, 0.14, 'sawtooth', 0.11),
+      wrong:  () => tone(140, 0, 0.22, 'sawtooth', 0.12),
+      fanfare: () => [523.25, 659.25, 783.99, 1046.5].forEach((f, i) => tone(f, i * 0.11, 0.26, 'triangle', 0.2)),
+    };
+  })();
+
+  /* ---------- конфетти ---------- */
+  function confetti() {
+    const host = $('confetti'), colors = ['#3e9b55', '#e5b22e', '#7b4a2a', '#5fb4d6', '#e08a5f', '#f2ede4'];
+    const n = 70, frag = document.createDocumentFragment();
+    for (let i = 0; i < n; i++) {
+      const el = document.createElement('i');
+      el.style.left = (Math.random() * 100) + 'vw';
+      el.style.background = colors[i % colors.length];
+      el.style.setProperty('--drift', (Math.random() * 30 - 15) + 'vw');
+      el.style.setProperty('--spin', (Math.random() * 540 - 270) + 'deg');
+      const dur = 1.8 + Math.random() * 1.4, delay = Math.random() * 0.5;
+      el.style.animationDuration = dur + 's'; el.style.animationDelay = delay + 's';
+      frag.appendChild(el);
+      setTimeout(() => el.remove(), (dur + delay) * 1000 + 100);
+    }
+    host.appendChild(frag);
+  }
+
+  let answer, row, cur, busy, over, kr = 0, kc = 0;
+  let state = 'menu';            // 'menu' | 'name1' | 'name2' | 'play' | 'over'
+  let twoPlayer = false, nameBuffer = '', triesLeft = MAX_TRIES, hintsUsed = 0;
+  let players = [{ name: 'Игрок 1', wins: 0 }, { name: 'Игрок 2', wins: 0 }];
+  let turn = 0;                  // индекс текущего игрока (0/1) в режиме на двоих
+
+  const keyEls = [];     // keyEls[r][c] → DOM (игровая клавиатура)
+  const menuEls = [[$('menu-list').children[0]], [$('menu-list').children[1]]];  // вертикальный список
+  const keyState = {};   // буква → 'g' | 'y' | 'b'
+  let tiles = [];         // tiles[r][c] → DOM
+
+  /* ---------- сохранение (необязательное) ---------- */
+  function load(k, def) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : def; } catch (e) { return def; } }
+  function save(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+  let stats = load('slovo.stats', { played: 0, won: 0 });
+
+  function pickWord() {   // «мешок»: слова не повторяются, пока не пройдут все
+    let bag = load('slovo.bag', []);
+    bag = bag.filter((i) => i < WORDS.length);
+    if (!bag.length) {
+      bag = WORDS.map((_, i) => i);
+      for (let i = bag.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [bag[i], bag[j]] = [bag[j], bag[i]]; }
+    }
+    const w = WORDS[bag.pop()];
+    save('slovo.bag', bag);
+    return w;
+  }
+
+  /* ---------- построение интерфейса ---------- */
+  function buildBoard() {
+    boardEl.innerHTML = ''; tiles = [];
+    for (let r = 0; r < MAX_TRIES; r++) {
+      const rowEl = document.createElement('div'); rowEl.className = 'row';
+      const t = [];
+      for (let c = 0; c < WORD_LEN; c++) { const d = document.createElement('div'); d.className = 'tile'; rowEl.appendChild(d); t.push(d); }
+      boardEl.appendChild(rowEl); tiles.push(t);
+    }
+  }
+  function buildKeyboard() {
+    kbEl.innerHTML = ''; keyEls.length = 0;
+    LAYOUT.forEach((keys) => {
+      const isEnterRow = keys.includes('ENTER');
+      const rowEl = document.createElement('div'); rowEl.className = 'krow' + (isEnterRow ? ' enter-row' : '');
+      const arr = keys.map((k) => {
+        const d = document.createElement('div');
+        let cls = 'key';
+        if (k === 'ENTER') cls += ' key-main';
+        else if (k === 'HINT') cls += ' key-hint';
+        else if (k === 'VOICE') cls += ' key-voice';
+        else if (k.length > 1) cls += ' wide';
+        d.className = cls;
+        d.textContent = k === 'ENTER' ? 'Ввод' : k === 'BACK' ? '⌫' : k === 'HINT' ? '💡' : k === 'VOICE' ? '🎤' : k;
+        d.dataset.k = k;
+        d.addEventListener('click', () => tapKey(d));
+        rowEl.appendChild(d); return d;
+      });
+      kbEl.appendChild(rowEl); keyEls.push(arr);
+    });
+  }
+
+  function activeRows() { return state === 'menu' ? menuEls : keyEls; }
+  function paintFocus() {
+    keyEls.forEach((r) => r.forEach((k) => k.classList.remove('focus')));
+    menuEls.forEach((r) => r.forEach((k) => k.classList.remove('focus')));
+    const rows = activeRows();
+    if (rows[kr] && rows[kr][kc]) rows[kr][kc].classList.add('focus');
+  }
+  function renderStats() {
+    $('stats').textContent = twoPlayer
+      ? 'Подсказок использовано: ' + hintsUsed
+      : 'Побед: ' + stats.won + ' из ' + stats.played;
+  }
+  function say(msg, isErr) { hintEl.textContent = msg; hintEl.className = isErr ? 'err' : ''; }
+
+  function refreshHintButton() {
+    const btn = keyEls[3] && keyEls[3][0];
+    if (!btn) return;
+    const can = state === 'play' && !busy && !over && cur.length < WORD_LEN && (triesLeft - 1) > row;
+    btn.classList.toggle('disabled', !can);
+  }
+
+  function burnRows() {
+    tiles.forEach((rowTiles, r) => {
+      const rowEl = rowTiles[0] && rowTiles[0].parentElement;
+      if (rowEl) rowEl.classList.toggle('burned', r >= triesLeft);
+    });
+  }
+
+  function updateScoreboard() {
+    const sb = $('scoreboard'); sb.classList.toggle('show', twoPlayer);
+    if (!twoPlayer) return;
+    [0, 1].forEach((i) => {
+      const chip = $('chip' + (i + 1));
+      chip.querySelector('.nm').textContent = players[i].name;
+      chip.querySelector('.sc').textContent = players[i].wins;
+      chip.classList.toggle('active', i === turn && state === 'play' && !over);
+    });
+  }
+
+  /* ---------- меню выбора режима ---------- */
+  function openMenu() {
+    state = 'menu'; kr = 0; kc = 0;
+    $('menu').classList.add('show');
+    paintFocus();
+  }
+  function chooseMode(idx) {
+    Sound.click();
+    twoPlayer = idx === 1;
+    $('menu').classList.remove('show');
+    if (twoPlayer) { players[0].name = ''; players[1].name = ''; startNameEntry(1); }
+    else { startGame(); }
+  }
+
+  /* ---------- ввод имени ---------- */
+  // Ввод имени показывается прямо над обычной клавиатурой (а не отдельным
+  // экраном поверх неё), чтобы клавиши оставались доступны для тапа на телефоне.
+  function renderNamebar(n) {
+    const bar = $('namebar');
+    bar.innerHTML = 'Имя игрока ' + n + ': ' + (nameBuffer ? nameBuffer : '<span class="cursor">…</span>');
+  }
+  function startNameEntry(n) {
+    state = 'name' + n; nameBuffer = '';
+    $('namebar').classList.add('show');
+    renderNamebar(n);
+    say('Наберите имя и нажмите «Ввод» (или сразу «Ввод» — имя по умолчанию)');
+    kr = 0; kc = 0; paintFocus();
+  }
+  function nameType(ch) {
+    if (nameBuffer.length >= 12) return;
+    nameBuffer += ch; renderNamebar(state === 'name1' ? 1 : 2); Sound.click();
+  }
+  function nameBackspace() {
+    nameBuffer = nameBuffer.slice(0, -1); renderNamebar(state === 'name1' ? 1 : 2); Sound.click();
+  }
+  function nameConfirm() {
+    const n = state === 'name1' ? 1 : 2;
+    players[n - 1].name = nameBuffer.trim() || ('Игрок ' + n);
+    Sound.click();
+    $('namebar').classList.remove('show');
+    if (n === 1) startNameEntry(2); else startGame();
+  }
+
+  /* ---------- игра ---------- */
+  function startGame() {
+    state = 'play'; answer = pickWord(); row = 0; cur = ''; busy = false; over = false;
+    triesLeft = MAX_TRIES; hintsUsed = 0; turn = 0;
+    for (const k in keyState) delete keyState[k];
+    buildBoard();
+    keyEls.forEach((r) => r.forEach((k) => { k.classList.remove('g', 'y', 'b'); }));
+    $('over').classList.remove('show');
+    say(twoPlayer ? (players[0].name + ', ваш ход') : 'Угадайте слово из 5 букв');
+    burnRows(); refreshHintButton(); updateScoreboard(); renderStats();
+    kr = 0; kc = 0; paintFocus();
+  }
+
+  function typeLetter(ch, hinted) {
+    if (busy || over || cur.length >= WORD_LEN) return;
+    tiles[row][cur.length].textContent = ch;
+    tiles[row][cur.length].classList.add('filled');
+    if (hinted) tiles[row][cur.length].classList.add('hinted');
+    cur += ch;
+    if (!hinted) Sound.click();
+  }
+  function backspace() {
+    if (busy || over || !cur.length) return;
+    cur = cur.slice(0, -1);
+    const t = tiles[row][cur.length]; t.textContent = ''; t.classList.remove('filled', 'hinted');
+    Sound.click();
+  }
+  function hint() {
+    if (!(state === 'play' && !busy && !over && cur.length < WORD_LEN && (triesLeft - 1) > row)) return;
+    typeLetter(answer[cur.length], true);
+    triesLeft--; hintsUsed++;
+    Sound.mid(); burnRows(); refreshHintButton(); renderStats();
+    say('Подсказка открыла букву «' + answer[cur.length - 1].toUpperCase() + '»');
+  }
+  function startVoiceInput() {
+    if (window.AndroidVoice && window.AndroidVoice.start) { window.AndroidVoice.start(); }
+    else { say('Голосовой ввод доступен в приложении на ТВ', true); }
+  }
+  window.voiceResult = function (text) {
+    const clean = (text || '').toLowerCase().replace(/ё/g, 'е').replace(/[^а-яъь]/g, '');
+    if (state === 'name1' || state === 'name2') {
+      nameBuffer = (text || '').trim().slice(0, 12); renderNamebar(state === 'name1' ? 1 : 2);
+      nameConfirm(); return;
+    }
+    if (state !== 'play' || busy || over) return;
+    if (clean.length !== WORD_LEN) { say('Не расслышал слово из 5 букв, попробуйте ещё раз', true); return; }
+    cur = '';
+    for (let i = 0; i < clean.length; i++) tiles[row][i].classList.remove('filled', 'hinted');
+    for (const ch of clean) typeLetter(ch);
+    submit();
+  };
+
+  function submit() {
+    if (busy || over) return;
+    if (cur.length < WORD_LEN) {
+      say('Нужно ' + WORD_LEN + ' букв', true);
+      const el = boardEl.children[row]; el.classList.remove('shake'); void el.offsetWidth; el.classList.add('shake');
+      Sound.wrong();
+      return;
+    }
+    busy = true;
+    const guess = cur, res = evaluate(guess, answer), r = row;
+    res.forEach((s, i) => {
+      setTimeout(() => tiles[r][i].classList.add('flip'), i * 300);
+      setTimeout(() => {
+        tiles[r][i].classList.remove('filled'); tiles[r][i].classList.add(s);
+        if (s === 'g') Sound.ding(); else if (s === 'y') Sound.mid(); else Sound.thud();
+      }, i * 300 + 300);
+    });
+    setTimeout(() => {
+      res.forEach((s, i) => {
+        const ch = guess[i], old = keyState[ch];
+        if (!old || (old === 'b' && s !== 'b') || (old === 'y' && s === 'g')) keyState[ch] = s;
+      });
+      keyEls.forEach((rw) => rw.forEach((k) => {
+        const s = keyState[k.dataset.k]; k.classList.remove('g', 'y', 'b'); if (s) k.classList.add(s);
+      }));
+      if (guess === answer) return finish(true);
+      row++; cur = '';
+      if (row >= triesLeft) return finish(false);
+      busy = false;
+      if (twoPlayer) {
+        turn = 1 - turn;
+        say(players[turn].name + ', ваш ход');
+        updateScoreboard();
+      } else {
+        say('Осталось попыток: ' + (triesLeft - row));
+      }
+      refreshHintButton();
+    }, 4 * 300 + 650);
+  }
+
+  function finish(won) {
+    state = 'over'; over = true; busy = false;
+    if (twoPlayer) {
+      if (won) { players[turn].wins++; }
+      $('over-title').textContent = won ? (players[turn].name + ' угадал(а) слово!') : 'Никто не угадал';
+    } else {
+      stats.played++; if (won) stats.won++; save('slovo.stats', stats);
+      $('over-title').textContent = won ? 'Угадали!' : 'Не угадали';
+    }
+    renderStats(); updateScoreboard();
+    const a = $('answer'); a.innerHTML = '';
+    for (const ch of answer) { const d = document.createElement('div'); d.className = 'tile ' + (won ? 'g' : 'b'); d.textContent = ch; a.appendChild(d); }
+    if (won) {
+      Sound.fanfare(); confetti();
+      tiles[row].forEach((t, i) => setTimeout(() => t.classList.add('winjump'), i * 90));
+    } else {
+      Sound.wrong();
+    }
+    $('over').classList.add('show');
+    // Отдельный фокус не нужен: на экране итога доступно только одно действие
+    // («Играть снова»), оно и так выделено рамкой по CSS, а OK/Enter
+    // перезапускают игру напрямую — см. press() и tvKey().
+  }
+
+  /* ---------- управление ---------- */
+  function press() {
+    if (state === 'menu') return chooseMode(kr);
+    if (state === 'over') return startGame();
+    if (state === 'name1' || state === 'name2') {
+      const k = keyEls[kr][kc].dataset.k;
+      if (k === 'ENTER') nameConfirm();
+      else if (k === 'BACK') nameBackspace();
+      else if (k === 'HINT' || k === 'VOICE') { /* не используются при вводе имени */ }
+      else nameType(k);
+      return;
+    }
+    // state === 'play'
+    const k = keyEls[kr][kc].dataset.k;
+    if (k === 'ENTER') submit();
+    else if (k === 'BACK') backspace();
+    else if (k === 'HINT') hint();
+    else if (k === 'VOICE') startVoiceInput();
+    else typeLetter(k);
+  }
+  function move(dir) {
+    if (state === 'over') return;
+    const rows = activeRows();
+    if (dir === 'left')  kc = Math.max(0, kc - 1);
+    if (dir === 'right') kc = Math.min(rows[kr].length - 1, kc + 1);
+    if (dir === 'up' || dir === 'down') {
+      const nr = kr + (dir === 'up' ? -1 : 1);
+      if (nr < 0 || nr >= rows.length) return;
+      const r = rows[kr][kc].getBoundingClientRect(), cx = r.left + r.width / 2;
+      let best = 0, bd = 1e9;
+      rows[nr].forEach((k, i) => { const b = k.getBoundingClientRect(), d = Math.abs(b.left + b.width / 2 - cx); if (d < bd) { bd = d; best = i; } });
+      kr = nr; kc = best;
+    }
+    paintFocus();
+  }
+
+  // Тап по игровой клавише на сенсорном экране (кнопки меню/имени обрабатываются отдельно ниже).
+  function tapKey(el) {
+    keyEls.forEach((row, r) => { const c = row.indexOf(el); if (c !== -1) { kr = r; kc = c; } });
+    paintFocus(); press();
+  }
+
+  // Прямая отправка/подтверждение — не зависит от текущего положения фокуса
+  // на экранной клавиатуре (так ведёт себя физическая клавиша Enter).
+  function directEnter() {
+    if (state === 'over') startGame();
+    else if (state === 'menu') chooseMode(kr);
+    else if (state === 'name1' || state === 'name2') nameConfirm();
+    else if (state === 'play') submit();
+  }
+
+  // Вызывается из Android (MainActivity) для кнопок пульта.
+  window.tvKey = function (cmd) {
+    if (cmd === 'ok') press();
+    else if (cmd === 'enter') directEnter();
+    else move(cmd);
+  };
+
+  // Обычная клавиатура (для проверки на компьютере или USB-клавиатуры на ТВ).
+  document.addEventListener('keydown', (e) => {
+    const k = e.key;
+    if (k === 'ArrowLeft') move('left'); else if (k === 'ArrowRight') move('right');
+    else if (k === 'ArrowUp') move('up'); else if (k === 'ArrowDown') move('down');
+    else if (k === 'Enter') directEnter();
+    else if (k === 'Backspace') {
+      if (state === 'name1' || state === 'name2') nameBackspace(); else if (state === 'play') backspace();
+    }
+    else if (k.length === 1) {
+      if (state === 'name1' || state === 'name2') { nameType(k); return e.preventDefault(); }
+      const ch = k.toLowerCase().replace('ё', 'е');
+      if (/^[а-яъь]$/.test(ch) && state === 'play') typeLetter(ch);
+    } else return;
+    e.preventDefault();
+  });
+
+  // Меню и имя — клики мышью/тапом.
+  Array.from($('menu-list').children).forEach((el, i) => el.addEventListener('click', () => chooseMode(i)));
+  $('again').addEventListener('click', () => { if (state === 'over') startGame(); });
+
+  buildKeyboard(); buildBoard(); openMenu();
+  window.__slovo = {                      // для отладки и автотестов
+    get answer() { return answer; },
+    get state() { return state; },
+    chooseMode, nameConfirm,
+    setName: (n, name) => { nameBuffer = name; },
+    newGame: startGame,
+  };
+})();
+</script>
+</body>
+</html>
